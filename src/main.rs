@@ -21,6 +21,7 @@ fn main() {
     if let Some(mode) = args.get(1) {
         let mut cargo_config_file: Option<Box<PathBuf>> = None;
         let mut cargo_crate_name: Option<String> = None;
+        let mut test_args: Option<Vec<String>> = None;
         if let Ok(current_dir) = env::current_dir() { 
             let config = current_dir.join(PathBuf::from(".cargo/config.toml"));
             let mut config_file = match File::open(config) {
@@ -80,7 +81,16 @@ fn main() {
                     if let Some(name_value) = name.as_str() {
                         cargo_crate_name = Some(String::from(name_value));
                     }
-                }  
+                } 
+                if let Some(metadata) = package.get("metadata") {
+                    if let Some(osc) = metadata.get("osc") {
+                        if let Some(test_arg) = osc.get("test-args") {
+                            if let Some(array) = test_arg.as_array() {
+                                test_args = Some(array.iter().map(|value| value.as_str().unwrap().to_string()).collect::<Vec<String>>());
+                            }  
+                        }
+                    }
+                }
             }
         }
         if mode == "build" {
@@ -106,7 +116,7 @@ fn main() {
                         if let Some(config_file_name) = config_file.file_stem() {
                             if let Some(config_file_name_string) = config_file_name.to_str() {
                                 if let Some(name) = cargo_crate_name {
-                                    build_iso(&String::from(current_dir.join(PathBuf::from(format!("target/{}/debug/{}", config_file_name_string, name))).to_str().unwrap()), &name, &current_dir);     
+                                    build_iso(&String::from(current_dir.join(PathBuf::from(format!("target/{}/debug/{}", config_file_name_string, name))).to_str().unwrap()), &name, &current_dir);
                                 }
                             } 
                         }
@@ -115,23 +125,30 @@ fn main() {
             }
         }
         else if mode == "runner" {
-             if let Ok(current_dir) = env::current_dir() {
-            if let Some(path) = args.get(2) {
-                if let Some(name) = cargo_crate_name {
-                let (iso, work_dir)= build_iso(path, &name, &current_dir);
-                if let Some(iso) = iso {
-                    if let Some(work_dir) = work_dir {
-                        let mut qemu = Command::new("qemu-system-x86_64");
-                        qemu.arg("-cdrom").arg(iso.to_str().unwrap()).current_dir(work_dir);
-                        for arg in args.iter().skip(3) {
-                            qemu.arg(arg);
+            if let Ok(current_dir) = env::current_dir() {
+                if let Some(path) = args.get(2) {
+                    if let Some(name) = cargo_crate_name {
+                        let (iso, work_dir)= build_iso(path, &name, &current_dir);
+                        if let Some(iso) = iso {
+                            if let Some(work_dir) = work_dir {
+                                let mut qemu = Command::new("qemu-system-x86_64");
+                                qemu.arg("-cdrom").arg(iso.to_str().unwrap()).current_dir(work_dir);
+                                for arg in args.iter().skip(3) {
+                                    qemu.arg(arg);
+                                }
+                                if path.starts_with(current_dir.to_str().unwrap()) {
+                                    if let Some(testargs) = test_args {
+                                        for arg in testargs.iter() {
+                                            qemu.arg(arg);
+                                        }   
+                                    }
+                                }
+                                qemu.status().expect("Qemu Failed");
+                            }
                         }
-                        qemu.status().expect("Qemu Failed"); 
                     }
                 }
-                }
             }
-             }
         }
     }
 }
