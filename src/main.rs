@@ -1,12 +1,88 @@
+use std::error::Error;
 use std::fs::{File, create_dir, remove_file, remove_dir_all};
-use std::io::{BufReader, BufRead};
+use std::io::{BufReader, BufRead, Read};
 use std::process::{Command, Stdio};
 use std::{env, fs};
 use std::path::{Path, PathBuf};
 
+use toml::Value;
+
+
+fn error_c(err: Option<Box<dyn Error>>) {
+    if let Some(error) = err { 
+        eprintln!("Error cannot find right configuration for this directory {}", error);
+    } else { 
+        eprintln!("Error cannot find right configuration for this directory");
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if let Some(mode) = args.get(1) {
+        let mut cargo_config_file: Option<Box<PathBuf>> = None;
+        let mut cargo_crate_name: Option<String> = None;
+        if let Ok(current_dir) = env::current_dir() { 
+            let config = current_dir.join(PathBuf::from(".cargo/config.toml"));
+            let mut config_file = match File::open(config) {
+                Ok(file) => file,
+                Err(e) => {
+                    error_c(Some(Box::from(e)));
+                    return;
+                }
+            };
+            
+            let mut toml_string = String::new();
+            if let Err(e) = config_file.read_to_string(&mut toml_string) {
+                error_c(Some(Box::from(e)));
+                return;
+            }
+
+            let toml_value: Value = match toml::de::from_str(&toml_string) {
+                Ok(value) => value,
+                Err(e) => {
+                    error_c(Some(Box::from(e)));
+                    return;
+                }
+            };
+            
+            if let Some(build_cfg) = toml_value.get("build") {
+                if let Some(target) = build_cfg.get("target") {
+                    if let Some(target_value) = target.as_str() {
+                        cargo_config_file = Some(Box::new(current_dir.join(PathBuf::from(target_value).as_path())));
+                    }
+                }  
+            }
+            let config = current_dir.join(PathBuf::from("Cargo.toml"));
+            let mut config_file = match File::open(config) {
+                Ok(file) => file,
+                Err(e) => {
+                    error_c(Some(Box::from(e)));
+                    return;
+                }
+            };
+            
+            let mut toml_string = String::new();
+            if let Err(e) = config_file.read_to_string(&mut toml_string) {
+                error_c(Some(Box::from(e)));
+                return;
+            }
+
+            let toml_value: Value = match toml::de::from_str(&toml_string) {
+                Ok(value) => value,
+                Err(e) => {
+                    error_c(Some(Box::from(e)));
+                    return;
+                }
+            };
+            
+            if let Some(package) = toml_value.get("package") {
+                if let Some(name) = package.get("name") {
+                    if let Some(name_value) = name.as_str() {
+                        cargo_crate_name = Some(String::from(name_value));
+                    }
+                }  
+            }
+        }
         if mode == "build" {
             if let Ok(current_dir) = env::current_dir() {
                 let mut cargo = Command::new("cargo");
@@ -16,15 +92,33 @@ fn main() {
                 }
                 cargo.status().expect("Cargo build failed");
                 if args.iter().skip(2).find(|&value| value == "--release").is_some() {
-                    build_iso(&String::from(current_dir.join(PathBuf::from("target/config/release/nothingos")).to_str().unwrap()));
+                    if let Some(config_file) = cargo_config_file {
+                        if let Some(config_file_name) = config_file.file_stem() {
+                            if let Some(config_file_name_string) = config_file_name.to_str() {
+                                if let Some(name) = cargo_crate_name {
+                                    build_iso(&String::from(current_dir.join(PathBuf::from(format!("target/{}/release/{}", config_file_name_string, name))).to_str().unwrap()), &name, &current_dir); 
+                                }
+                            } 
+                        }
+                    }
                 } else {
-                    build_iso(&String::from(current_dir.join(PathBuf::from("target/config/debug/nothingos")).to_str().unwrap()));
+                    if let Some(config_file) = cargo_config_file {
+                        if let Some(config_file_name) = config_file.file_stem() {
+                            if let Some(config_file_name_string) = config_file_name.to_str() {
+                                if let Some(name) = cargo_crate_name {
+                                    build_iso(&String::from(current_dir.join(PathBuf::from(format!("target/{}/debug/{}", config_file_name_string, name))).to_str().unwrap()), &name, &current_dir);     
+                                }
+                            } 
+                        }
+                    }
                 }
             }
         }
         else if mode == "runner" {
+             if let Ok(current_dir) = env::current_dir() {
             if let Some(path) = args.get(2) {
-                let (iso, work_dir)= build_iso(path);
+                if let Some(name) = cargo_crate_name {
+                let (iso, work_dir)= build_iso(path, &name, &current_dir);
                 if let Some(iso) = iso {
                     if let Some(work_dir) = work_dir {
                         let mut qemu = Command::new("qemu-system-x86_64");
@@ -35,18 +129,20 @@ fn main() {
                         qemu.status().expect("Qemu Failed"); 
                     }
                 }
+                }
             }
+             }
         }
     }
 }
 
-fn build_iso(path: &String) -> (Option<Box<Path>>, Option<Box<Path>>) {
+fn build_iso(path: &String, cargo_crate_name: &String, current_dir_5555: &PathBuf) -> (Option<Box<Path>>, Option<Box<Path>>) {
     let mut path = path.clone();
-    if !path.starts_with("/disk/data/nothingos/") { 
-            path.insert_str(0, "/disk/data/nothingos/") 
+    if !path.starts_with(current_dir_5555.to_str().unwrap()) { 
+            path.insert_str(0, format!("{}/", current_dir_5555.to_str().unwrap()).as_str()); 
         };
         let path = Path::new(&path);
-        if path.parent().unwrap().file_name().unwrap() == "deps" && get_first_segment(path.file_name().unwrap().to_str().unwrap()) == "nothingos" {
+        if path.parent().unwrap().file_name().unwrap() == "deps" && get_first_segment(path.file_name().unwrap().to_str().unwrap()) == cargo_crate_name.as_str() {
             remove_file(path).unwrap();
             remove_file(path.to_str().unwrap().to_owned() + ".d").unwrap();
             return (None, None);
@@ -89,7 +185,8 @@ fn build_iso(path: &String) -> (Option<Box<Path>>, Option<Box<Path>>) {
                 })
                 .collect();
                 let mut command = std::process::Command::new("ld");
-                command.arg("-n").arg("--gc-sections").arg("-o").arg(work_dir.join(PathBuf::from("iso").join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))))).arg("-T").arg("/disk/data/nothingos/linker.ld").current_dir(directory.join(PathBuf::from("build-temp"))).stdout(Stdio::null())
+                command.arg("-n").arg("--gc-sections").arg("-o").arg(work_dir.join(PathBuf::from("iso").join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))))).arg("-T")
+                    .arg(current_dir_5555.join(PathBuf::from("linker.ld")).to_str().unwrap()).current_dir(directory.join(PathBuf::from("build-temp"))).stdout(Stdio::null())
                 .stderr(Stdio::null());
                 for object_file in &object_files {
                     command.arg(object_file);
