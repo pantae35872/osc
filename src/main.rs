@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fs::{File, create_dir, remove_file, remove_dir_all};
 use std::io::{BufReader, BufRead, Read};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 use std::{env, fs};
 use std::path::{Path, PathBuf};
 
@@ -182,7 +183,7 @@ fn build_iso(path: &String, cargo_crate_name: &String, current_dir_5555: &PathBu
             }
             create_dir(directory.join(PathBuf::from("build-temp"))).unwrap();
 
-            get_object(index, directory, path, deps_dir.clone(), prefix, work_dir);
+            get_object(index, directory, path, deps_dir.clone(), prefix, work_dir, cargo_crate_name);
             let object_files: Vec<String> = fs::read_dir(directory.join(PathBuf::from("build-temp")))
             .expect("Failed to read object directory")
             .filter_map(|entry| {
@@ -203,14 +204,16 @@ fn build_iso(path: &String, cargo_crate_name: &String, current_dir_5555: &PathBu
                 .collect();
                 let mut command = std::process::Command::new("ld");
                 command.arg("-n").arg("--gc-sections").arg("-o").arg(work_dir.join(PathBuf::from("iso").join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))))).arg("-T")
-                    .arg(current_dir_5555.join(PathBuf::from("linker.ld")).to_str().unwrap()).current_dir(directory.join(PathBuf::from("build-temp"))).stdout(Stdio::null())
-                .stderr(Stdio::null());
+                    .arg(current_dir_5555.join(PathBuf::from("linker.ld")).to_str().unwrap()).current_dir(directory.join(PathBuf::from("build-temp")))/*.stdout(Stdio::null())
+                .stderr(Stdio::null())*/;
                 for object_file in &object_files {
                     command.arg(object_file);
                 }
+                println!("{:?}", command);
                 let status = command.status().expect("Failed to run linker");
                 !status.success()
             } {
+                std::thread::sleep(Duration::from_secs(1));
                 index+=1;
             }
             let mut iso_grub = Command::new("grub-mkrescue");
@@ -242,8 +245,8 @@ fn get_files_with_extension_and_prefix(directory_path: &Path, extension: &str, p
     result
 }
 
-fn get_object(index: usize, directory: &Path, path: &Path, deps_dir: PathBuf, prefix: &str, work_dir: &Path) {
-   get_lib(directory, path, deps_dir.clone());
+fn get_object(index: usize, directory: &Path, path: &Path, deps_dir: PathBuf, prefix: &str, work_dir: &Path, cargo_crate_name: &String) {
+   get_lib(directory, path, deps_dir.clone(), cargo_crate_name, index);
    get_asm(work_dir, directory);
    get_bin(index, deps_dir, prefix, directory);
 }
@@ -279,8 +282,10 @@ fn get_asm(work_dir: &Path, directory: &Path) {
 
 }
 
-fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf) {
-            let d_files = get_files_with_extension_and_prefix(&deps_dir, ".d", "nothingos");
+fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &String, index: usize) {
+            let d_files = get_files_with_extension_and_prefix(&deps_dir, ".d", cargo_crate_name);
+            let mut files: Vec<Box<Path>> = Vec::new();
+
             if path.parent().unwrap().file_name().unwrap() != "deps" {
                 for file in d_files {
                     let file = File::open(file).unwrap();
@@ -309,12 +314,9 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf) {
             
                                 let file = Path::new(seperate_path_makefile(line));
                                 if seperate_path_makefile(line).ends_with(".a") {
-                                    fs::copy(file, Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))).unwrap();
-                                    extract_static_library(Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))).to_str().unwrap()
-                                            , directory.join(PathBuf::from("build-temp")).to_str().unwrap());
+                                    files.push(Box::from(file));
                                 }
                             }
-                            break;
                         }
                     } 
                 }
@@ -341,16 +343,18 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf) {
             
                                     let file = Path::new(seperate_path_makefile(line));
                                     if seperate_path_makefile(line).ends_with(".a") {
-                                        fs::copy(file, Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))).unwrap();
-                                        extract_static_library(Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))).to_str().unwrap()
-                                                   , directory.join(PathBuf::from("build-temp")).to_str().unwrap());
+                                        files.push(Box::from(file));
                                     }
                                 }
-                                break;
                             }
                         }
                     } 
                 }
+            }
+            if let Some(file) = files.get(index) {
+                fs::copy(file, Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))).unwrap();
+                extract_static_library(Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))).to_str().unwrap()
+                            , directory.join(PathBuf::from("build-temp")).to_str().unwrap());
             }
             }
             fn get_bin(index: usize, deps_dir: PathBuf, prefix: &str, directory: &Path) {
@@ -376,6 +380,7 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf) {
                             let file = Path::new(seperate_path_makefile(line));
                             if seperate_path_makefile(line).ends_with(".o") {
                                 files.push(Box::from(file));
+                                println!("{}", file.display());
                             }
                         }
                     }
