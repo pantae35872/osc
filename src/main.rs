@@ -204,12 +204,11 @@ fn build_iso(path: &String, cargo_crate_name: &String, current_dir_5555: &PathBu
                 .collect();
                 let mut command = std::process::Command::new("ld");
                 command.arg("-n").arg("--gc-sections").arg("-o").arg(work_dir.join(PathBuf::from("iso").join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))))).arg("-T")
-                    .arg(current_dir_5555.join(PathBuf::from("linker.ld")).to_str().unwrap()).current_dir(directory.join(PathBuf::from("build-temp")))/*.stdout(Stdio::null())
-                .stderr(Stdio::null())*/;
+                    .arg(current_dir_5555.join(PathBuf::from("linker.ld")).to_str().unwrap()).current_dir(directory.join(PathBuf::from("build-temp"))).stdout(Stdio::null())
+                .stderr(Stdio::null());
                 for object_file in &object_files {
                     command.arg(object_file);
                 }
-                println!("{:?}", command);
                 let status = command.status().expect("Failed to run linker");
                 !status.success()
             } {
@@ -378,7 +377,6 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &
                             let file = Path::new(seperate_path_makefile(line));
                             if seperate_path_makefile(line).ends_with(".o") {
                                 files.push(Box::from(file));
-                                println!("{}", file.display());
                             }
                         }
                     }
