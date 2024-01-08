@@ -246,7 +246,7 @@ fn get_files_with_extension_and_prefix(directory_path: &Path, extension: &str, p
 }
 
 fn get_object(index: usize, directory: &Path, path: &Path, deps_dir: PathBuf, prefix: &str, work_dir: &Path, cargo_crate_name: &String) {
-   get_lib(directory, path, deps_dir.clone(), cargo_crate_name, index);
+   get_lib(directory, path, deps_dir.clone(), cargo_crate_name);
    get_asm(work_dir, directory);
    get_bin(index, deps_dir, prefix, directory);
 }
@@ -282,9 +282,8 @@ fn get_asm(work_dir: &Path, directory: &Path) {
 
 }
 
-fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &String, index: usize) {
+fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &String) {
             let d_files = get_files_with_extension_and_prefix(&deps_dir, ".d", cargo_crate_name);
-            let mut files: Vec<Box<Path>> = Vec::new();
 
             if path.parent().unwrap().file_name().unwrap() != "deps" {
                 for file in d_files {
@@ -314,7 +313,9 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &
             
                                 let file = Path::new(seperate_path_makefile(line));
                                 if seperate_path_makefile(line).ends_with(".a") {
-                                    files.push(Box::from(file));
+                                        fs::copy(file, Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))).unwrap();
+                                        extract_static_library(Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))).to_str().unwrap()
+                                            , directory.join(PathBuf::from("build-temp")).to_str().unwrap());
                                 }
                             }
                         }
@@ -343,18 +344,15 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &
             
                                     let file = Path::new(seperate_path_makefile(line));
                                     if seperate_path_makefile(line).ends_with(".a") {
-                                        files.push(Box::from(file));
+                                        fs::copy(file, Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))).unwrap();
+                                        extract_static_library(Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))).to_str().unwrap()
+                                            , directory.join(PathBuf::from("build-temp")).to_str().unwrap());
                                     }
                                 }
                             }
                         }
                     } 
                 }
-            }
-            if let Some(file) = files.get(index) {
-                fs::copy(file, Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))).unwrap();
-                extract_static_library(Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))).to_str().unwrap()
-                            , directory.join(PathBuf::from("build-temp")).to_str().unwrap());
             }
             }
             fn get_bin(index: usize, deps_dir: PathBuf, prefix: &str, directory: &Path) {
