@@ -23,6 +23,7 @@ fn main() {
         let mut cargo_config_file: Option<Box<PathBuf>> = None;
         let mut cargo_crate_name: Option<String> = None;
         let mut test_args: Option<Vec<String>> = None;
+        let mut run_args: Option<Vec<String>> = None;
         if let Ok(current_dir) = env::current_dir() { 
             let config = current_dir.join(PathBuf::from(".cargo/config.toml"));
             let mut config_file = match File::open(config) {
@@ -90,6 +91,11 @@ fn main() {
                                 test_args = Some(array.iter().map(|value| value.as_str().unwrap().to_string()).collect::<Vec<String>>());
                             }  
                         }
+                        if let Some(run_arg) = osc.get("run-args") {
+                            if let Some(array) = run_arg.as_array() {
+                                run_args = Some(array.iter().map(|value| value.as_str().unwrap().to_string()).collect::<Vec<String>>());
+                            }  
+                        }
                     }
                 }
             }
@@ -143,6 +149,13 @@ fn main() {
                                             qemu.arg(arg);
                                         }   
                                     }
+                                 } else {
+                                    if let Some(runargs) = run_args {
+                                        for arg in runargs.iter() {
+                                            qemu.arg(arg);
+                                        }   
+                                    }
+
                                 }
                                 qemu.status().expect("Qemu Failed");
                             }
