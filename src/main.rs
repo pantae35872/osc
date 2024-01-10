@@ -250,82 +250,93 @@ fn build_iso(
             .unwrap();
         let mut index = 0;
         while {
-            if directory.join(PathBuf::from("build-temp")).exists() {
-                remove_dir_all(directory.join(PathBuf::from("build-temp"))).unwrap();
-            }
-            create_dir(directory.join(PathBuf::from("build-temp"))).unwrap();
+            let mut inc = false;
+            for bin_index in index..=index + 5 {
+                for lib_index in index..=index + 5 {
+                    if directory.join(PathBuf::from("build-temp")).exists() {
+                        remove_dir_all(directory.join(PathBuf::from("build-temp"))).unwrap();
+                    }
+                    create_dir(directory.join(PathBuf::from("build-temp"))).unwrap();
 
-            get_object(
-                index,
-                directory,
-                path,
-                deps_dir.clone(),
-                prefix,
-                work_dir,
-                cargo_crate_name,
-            );
-            let object_files: Vec<String> =
-                fs::read_dir(directory.join(PathBuf::from("build-temp")))
-                    .expect("Failed to read object directory")
-                    .filter_map(|entry| {
-                        if let Ok(entry) = entry {
-                            if let Some(extension) = entry.path().extension() {
-                                if extension == "o" {
-                                    Some(entry.path().to_string_lossy().into_owned())
+                    get_object(
+                        bin_index,
+                        lib_index,
+                        directory,
+                        path,
+                        deps_dir.clone(),
+                        prefix,
+                        work_dir,
+                        cargo_crate_name,
+                    );
+                    let object_files: Vec<String> =
+                        fs::read_dir(directory.join(PathBuf::from("build-temp")))
+                            .expect("Failed to read object directory")
+                            .filter_map(|entry| {
+                                if let Ok(entry) = entry {
+                                    if let Some(extension) = entry.path().extension() {
+                                        if extension == "o" {
+                                            Some(entry.path().to_string_lossy().into_owned())
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-            let mut command = std::process::Command::new("ld");
-            command
-                .arg("-n")
-                .arg("--gc-sections")
-                .arg("-o")
-                .arg(
-                    work_dir.join(
-                        PathBuf::from("iso")
-                            .join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))),
-                    ),
-                )
-                .arg("-T")
-                .arg(
-                    current_dir_5555
-                        .join(PathBuf::from("linker.ld"))
-                        .to_str()
-                        .unwrap(),
-                )
-                .current_dir(directory.join(PathBuf::from("build-temp")))
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            for object_file in &object_files {
-                command.arg(object_file);
+                            })
+                            .collect();
+                    let mut command = std::process::Command::new("ld");
+                    command
+                        .arg("-n")
+                        .arg("--gc-sections")
+                        .arg("-o")
+                        .arg(
+                            work_dir.join(
+                                PathBuf::from("iso")
+                                    .join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))),
+                            ),
+                        )
+                        .arg("-T")
+                        .arg(
+                            current_dir_5555
+                                .join(PathBuf::from("linker.ld"))
+                                .to_str()
+                                .unwrap(),
+                        )
+                        .current_dir(directory.join(PathBuf::from("build-temp")))
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                    for object_file in &object_files {
+                        command.arg(object_file);
+                    }
+                    let status = command.status().expect("Failed to run linker");
+
+                    if !status.success() && !inc {
+                        inc = true;
+                    } else {
+                        let mut iso_grub = Command::new("grub-mkrescue");
+                        iso_grub
+                            .arg("-o")
+                            .arg("os.iso")
+                            .arg("iso")
+                            .current_dir(work_dir)
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null());
+                        iso_grub.status().expect("Failed to build iso");
+                        return (
+                            Some(Box::from(work_dir.join(PathBuf::from("os.iso").as_path()))),
+                            Some(Box::from(work_dir)),
+                        );
+                    }
+                }
             }
-            let status = command.status().expect("Failed to run linker");
-            !status.success()
+            inc
         } {
             std::thread::sleep(Duration::from_secs(1));
             index += 1;
         }
-        let mut iso_grub = Command::new("grub-mkrescue");
-        iso_grub
-            .arg("-o")
-            .arg("os.iso")
-            .arg("iso")
-            .current_dir(work_dir)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        iso_grub.status().expect("Failed to build iso");
-        return (
-            Some(Box::from(work_dir.join(PathBuf::from("os.iso").as_path()))),
-            Some(Box::from(work_dir)),
-        );
     }
     return (None, None);
 }
@@ -356,6 +367,7 @@ fn get_files_with_extension_and_prefix(
 
 fn get_object(
     index: usize,
+    lib_index: usize,
     directory: &Path,
     path: &Path,
     deps_dir: PathBuf,
@@ -363,7 +375,13 @@ fn get_object(
     work_dir: &Path,
     cargo_crate_name: &String,
 ) {
-    get_lib(directory, path, deps_dir.clone(), cargo_crate_name);
+    get_lib(
+        directory,
+        path,
+        deps_dir.clone(),
+        cargo_crate_name,
+        &lib_index,
+    );
     get_asm(work_dir, directory);
     get_bin(index, deps_dir, prefix, directory);
 }
@@ -408,9 +426,15 @@ fn get_asm(work_dir: &Path, directory: &Path) {
     }
 }
 
-fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &String) {
+fn get_lib(
+    directory: &Path,
+    path: &Path,
+    deps_dir: PathBuf,
+    cargo_crate_name: &String,
+    index: &usize,
+) {
     let d_files = get_files_with_extension_and_prefix(&deps_dir, ".d", cargo_crate_name);
-
+    let mut files: Vec<Box<Path>> = Vec::new();
     if path.parent().unwrap().file_name().unwrap() != "deps" {
         for file in d_files {
             let file = File::open(file).unwrap();
@@ -439,24 +463,7 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &
 
                         let file = Path::new(seperate_path_makefile(line));
                         if seperate_path_makefile(line).ends_with(".a") {
-                            fs::copy(
-                                file,
-                                Path::new(&directory.join(
-                                    PathBuf::from("build-temp").join(file.file_name().unwrap()),
-                                )),
-                            )
-                            .unwrap();
-                            extract_static_library(
-                                Path::new(&directory.join(
-                                    PathBuf::from("build-temp").join(file.file_name().unwrap()),
-                                ))
-                                .to_str()
-                                .unwrap(),
-                                directory
-                                    .join(PathBuf::from("build-temp"))
-                                    .to_str()
-                                    .unwrap(),
-                            );
+                            files.push(Box::from(file));
                         }
                     }
                 }
@@ -485,30 +492,29 @@ fn get_lib(directory: &Path, path: &Path, deps_dir: PathBuf, cargo_crate_name: &
 
                             let file = Path::new(seperate_path_makefile(line));
                             if seperate_path_makefile(line).ends_with(".a") {
-                                fs::copy(
-                                    file,
-                                    Path::new(&directory.join(
-                                        PathBuf::from("build-temp").join(file.file_name().unwrap()),
-                                    )),
-                                )
-                                .unwrap();
-                                extract_static_library(
-                                    Path::new(&directory.join(
-                                        PathBuf::from("build-temp").join(file.file_name().unwrap()),
-                                    ))
-                                    .to_str()
-                                    .unwrap(),
-                                    directory
-                                        .join(PathBuf::from("build-temp"))
-                                        .to_str()
-                                        .unwrap(),
-                                );
+                                files.push(Box::from(file));
                             }
                         }
                     }
                 }
             }
         }
+    }
+    if let Some(file) = files.get(*index) {
+        fs::copy(
+            file,
+            Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))),
+        )
+        .unwrap();
+        extract_static_library(
+            Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap())))
+                .to_str()
+                .unwrap(),
+            directory
+                .join(PathBuf::from("build-temp"))
+                .to_str()
+                .unwrap(),
+        );
     }
 }
 fn get_bin(index: usize, deps_dir: PathBuf, prefix: &str, directory: &Path) {
