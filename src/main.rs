@@ -313,7 +313,6 @@ fn build_iso(
                     }
                     let status = command.status().expect("Failed");
                     if !status.success()
-                        || !inc
                         || !work_dir
                             .join(
                                 PathBuf::from("iso")
@@ -321,7 +320,9 @@ fn build_iso(
                             )
                             .exists()
                     {
-                        inc = true;
+                        if inc == false {
+                            inc = true;
+                        }
                     } else {
                         let mut iso_grub = Command::new("grub-mkrescue");
                         iso_grub
