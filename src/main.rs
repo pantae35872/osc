@@ -311,9 +311,16 @@ fn build_iso(
                     for object_file in &object_files {
                         command.arg(object_file);
                     }
-                    let status = command.status().expect("Failed to run linker");
-
-                    if !status.success() && !inc {
+                    let status = command.status().expect("Failed");
+                    if !status.success()
+                        || !inc
+                        || !work_dir
+                            .join(
+                                PathBuf::from("iso")
+                                    .join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))),
+                            )
+                            .exists()
+                    {
                         inc = true;
                     } else {
                         let mut iso_grub = Command::new("grub-mkrescue");
