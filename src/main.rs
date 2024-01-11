@@ -258,9 +258,6 @@ fn build_iso(
         }
         create_dir(directory.join(PathBuf::from("build-temp-bin"))).unwrap();
 
-        use indicatif::ParallelProgressIterator;
-        use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-
         let progress_bar = ProgressBar::new(25 as u64);
 
         // Define a custom progress bar style
