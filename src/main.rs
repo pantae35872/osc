@@ -258,14 +258,12 @@ fn build_iso(
         }
         create_dir(directory.join(PathBuf::from("build-temp-bin"))).unwrap();
 
-        let progress_bar = ProgressBar::new(25 as u64);
+        let progress_bar = ProgressBar::new(200 as u64);
 
-        // Define a custom progress bar style
         let style = ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
+            .template("Compiling your os: [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
             .expect("")
             .progress_chars("#>-");
-        // Apply the custom style to the progress bar
         progress_bar.set_style(style);
 
         while {
@@ -363,14 +361,14 @@ fn build_iso(
                         }
                         error_count = 0;
                     }
-                    progress_bar.inc(1);
+                    progress_bar.inc(error_count);
                 }
             }
             progress_bar.set_length(
                 progress_bar
                     .length()
                     .expect("Cannot get length of progress_bar")
-                    - 1,
+                    - 30,
             );
             inc
         } {
