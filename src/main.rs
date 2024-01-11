@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use std::{env, fs};
 
+use indicatif::{ProgressBar, ProgressStyle};
 use toml::Value;
 
 fn error_c(err: Option<Box<dyn Error>>) {
@@ -249,16 +250,43 @@ fn build_iso(
             .parent()
             .unwrap();
         let mut index = 0;
+        let mut error_count = 0;
+        let mut count = 0;
+        let mut result: Vec<(Box<Path>, Duration)> = Vec::new();
+        if directory.join(PathBuf::from("build-temp-bin")).exists() {
+            remove_dir_all(directory.join(PathBuf::from("build-temp-bin"))).unwrap();
+        }
+        create_dir(directory.join(PathBuf::from("build-temp-bin"))).unwrap();
+
+        use indicatif::ParallelProgressIterator;
+        use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+        let progress_bar = ProgressBar::new(25 as u64);
+
+        // Define a custom progress bar style
+        let style = ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%)")
+            .expect("")
+            .progress_chars("#>-");
+        // Apply the custom style to the progress bar
+        progress_bar.set_style(style);
+
         while {
             let mut inc = false;
             for bin_index in index..=index + 5 {
+                if error_count >= 15 {
+                    break;
+                }
                 for lib_index in index..=index + 5 {
+                    if error_count >= 15 {
+                        break;
+                    }
+                    count += 1;
                     if directory.join(PathBuf::from("build-temp")).exists() {
                         remove_dir_all(directory.join(PathBuf::from("build-temp"))).unwrap();
                     }
                     create_dir(directory.join(PathBuf::from("build-temp"))).unwrap();
-
-                    get_object(
+                    let created = get_object(
                         bin_index,
                         lib_index,
                         directory,
@@ -293,9 +321,9 @@ fn build_iso(
                         .arg("--gc-sections")
                         .arg("-o")
                         .arg(
-                            work_dir.join(
-                                PathBuf::from("iso")
-                                    .join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))),
+                            directory.join(
+                                PathBuf::from("build-temp-bin")
+                                    .join(PathBuf::from(format!("{}.bin", count))),
                             ),
                         )
                         .arg("-T")
@@ -313,38 +341,72 @@ fn build_iso(
                     }
                     let status = command.status().expect("Failed");
                     if !status.success()
-                        || !work_dir
+                        || !directory
                             .join(
-                                PathBuf::from("iso")
-                                    .join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))),
+                                PathBuf::from("build-temp-bin")
+                                    .join(PathBuf::from(format!("{}.bin", count))),
                             )
                             .exists()
                     {
                         if inc == false {
                             inc = true;
                         }
+                        error_count += 1;
                     } else {
-                        let mut iso_grub = Command::new("grub-mkrescue");
-                        iso_grub
-                            .arg("-o")
-                            .arg("os.iso")
-                            .arg("iso")
-                            .current_dir(work_dir)
-                            .stdout(Stdio::null())
-                            .stderr(Stdio::null());
-                        iso_grub.status().expect("Failed to build iso");
-                        return (
-                            Some(Box::from(work_dir.join(PathBuf::from("os.iso").as_path()))),
-                            Some(Box::from(work_dir)),
-                        );
+                        if let Some(value) = created {
+                            result.push((
+                                Box::from(
+                                    directory.join(
+                                        PathBuf::from("build-temp-bin")
+                                            .join(PathBuf::from(format!("{}.bin", count))),
+                                    ),
+                                ),
+                                value,
+                            ));
+                        }
+                        error_count = 0;
                     }
+                    progress_bar.inc(1);
                 }
             }
+            progress_bar.set_length(
+                progress_bar
+                    .length()
+                    .expect("Cannot get length of progress_bar")
+                    - 1,
+            );
             inc
         } {
             std::thread::sleep(Duration::from_secs(1));
             index += 1;
         }
+        if let Some((min_path, _min_duration)) = result.iter().min_by_key(|&(_, duration)| duration)
+        {
+            fs::copy(
+                min_path,
+                work_dir.join(
+                    PathBuf::from("iso")
+                        .join(PathBuf::from("boot").join(PathBuf::from("kernel.bin"))),
+                ),
+            )
+            .expect("Fs error");
+            let mut iso_grub = Command::new("grub-mkrescue");
+            iso_grub
+                .arg("-o")
+                .arg("os.iso")
+                .arg("iso")
+                .current_dir(work_dir)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            iso_grub.status().expect("Failed to build iso");
+            return (
+                Some(Box::from(work_dir.join(PathBuf::from("os.iso").as_path()))),
+                Some(Box::from(work_dir)),
+            );
+        } else {
+            println!("Vector is empty");
+        }
+        progress_bar.finish();
     }
     return (None, None);
 }
@@ -382,8 +444,8 @@ fn get_object(
     prefix: &str,
     work_dir: &Path,
     cargo_crate_name: &String,
-) {
-    get_lib(
+) -> Option<Duration> {
+    let val = get_lib(
         directory,
         path,
         deps_dir.clone(),
@@ -392,6 +454,7 @@ fn get_object(
     );
     get_asm(work_dir, directory);
     get_bin(index, deps_dir, prefix, directory);
+    val
 }
 
 fn get_asm(work_dir: &Path, directory: &Path) {
@@ -440,7 +503,7 @@ fn get_lib(
     deps_dir: PathBuf,
     cargo_crate_name: &String,
     index: &usize,
-) {
+) -> Option<Duration> {
     let d_files = get_files_with_extension_and_prefix(&deps_dir, ".d", cargo_crate_name);
     let mut files: Vec<Box<Path>> = Vec::new();
     if path.parent().unwrap().file_name().unwrap() != "deps" {
@@ -509,6 +572,8 @@ fn get_lib(
         }
     }
     if let Some(file) = files.get(*index) {
+        let metadata = fs::metadata(file).expect("metadata not found");
+        metadata.created().expect("RRR").elapsed().expect("ERROR");
         fs::copy(
             file,
             Path::new(&directory.join(PathBuf::from("build-temp").join(file.file_name().unwrap()))),
@@ -523,7 +588,15 @@ fn get_lib(
                 .to_str()
                 .unwrap(),
         );
+        return Some(
+            metadata
+                .created()
+                .expect("Cannot find file created time")
+                .elapsed()
+                .expect("Cannot find elapsed"),
+        );
     }
+    None
 }
 fn get_bin(index: usize, deps_dir: PathBuf, prefix: &str, directory: &Path) {
     let d_files = get_files_with_extension_and_prefix(&deps_dir, ".d", prefix);
