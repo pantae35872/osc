@@ -155,7 +155,7 @@ fn main() {
                         if let Some(config_file_name) = config_file.file_stem() {
                             if let Some(config_file_name_string) = config_file_name.to_str() {
                                 if let Some(name) = cargo_crate_name {
-                                    build_iso(
+                                    let (_iso, _work_dir, progress_bar) = build_iso(
                                         &String::from(
                                             current_dir
                                                 .join(PathBuf::from(format!(
@@ -168,6 +168,9 @@ fn main() {
                                         &name,
                                         &current_dir,
                                     );
+                                    if let Some(progress_bar) = progress_bar {
+                                        progress_bar.finish();
+                                    }
                                 }
                             }
                         }
@@ -178,30 +181,33 @@ fn main() {
             if let Ok(current_dir) = env::current_dir() {
                 if let Some(path) = args.get(2) {
                     if let Some(name) = cargo_crate_name {
-                        let (iso, work_dir) = build_iso(path, &name, &current_dir);
+                        let (iso, work_dir, progress_bar) = build_iso(path, &name, &current_dir);
                         if let Some(iso) = iso {
                             if let Some(work_dir) = work_dir {
-                                let mut qemu = Command::new("qemu-system-x86_64");
-                                qemu.arg("-cdrom")
-                                    .arg(iso.to_str().unwrap())
-                                    .current_dir(work_dir);
-                                for arg in args.iter().skip(3) {
-                                    qemu.arg(arg);
-                                }
-                                if path.starts_with(current_dir.to_str().unwrap()) {
-                                    if let Some(testargs) = test_args {
-                                        for arg in testargs.iter() {
-                                            qemu.arg(arg);
+                                if let Some(progress_bar) = progress_bar {
+                                    let mut qemu = Command::new("qemu-system-x86_64");
+                                    qemu.arg("-cdrom")
+                                        .arg(iso.to_str().unwrap())
+                                        .current_dir(work_dir);
+                                    for arg in args.iter().skip(3) {
+                                        qemu.arg(arg);
+                                    }
+                                    if path.starts_with(current_dir.to_str().unwrap()) {
+                                        if let Some(testargs) = test_args {
+                                            for arg in testargs.iter() {
+                                                qemu.arg(arg);
+                                            }
+                                        }
+                                    } else {
+                                        if let Some(runargs) = run_args {
+                                            for arg in runargs.iter() {
+                                                qemu.arg(arg);
+                                            }
                                         }
                                     }
-                                } else {
-                                    if let Some(runargs) = run_args {
-                                        for arg in runargs.iter() {
-                                            qemu.arg(arg);
-                                        }
-                                    }
+                                    qemu.status().expect("Qemu Failed");
+                                    progress_bar.finish();
                                 }
-                                qemu.status().expect("Qemu Failed");
                             }
                         }
                     }
@@ -215,7 +221,11 @@ fn build_iso(
     path: &String,
     cargo_crate_name: &String,
     current_dir_5555: &PathBuf,
-) -> (Option<Box<Path>>, Option<Box<Path>>) {
+) -> (
+    Option<Box<Path>>,
+    Option<Box<Path>>,
+    Option<Box<ProgressBar>>,
+) {
     let mut path = path.clone();
     if !path.starts_with(current_dir_5555.to_str().unwrap()) {
         path.insert_str(
@@ -230,7 +240,7 @@ fn build_iso(
     {
         remove_file(path).unwrap();
         remove_file(path.to_str().unwrap().to_owned() + ".d").unwrap();
-        return (None, None);
+        return (None, None, None);
     }
 
     let mut prefix = path.file_name().unwrap().to_str().unwrap();
@@ -397,13 +407,13 @@ fn build_iso(
             return (
                 Some(Box::from(work_dir.join(PathBuf::from("os.iso").as_path()))),
                 Some(Box::from(work_dir)),
+                Some(Box::from(progress_bar)),
             );
         } else {
             println!("Vector is empty");
         }
-        progress_bar.finish();
     }
-    return (None, None);
+    return (None, None, None);
 }
 
 fn get_files_with_extension_and_prefix(
