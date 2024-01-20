@@ -291,6 +291,39 @@ fn build_iso(
                         remove_dir_all(directory.join(PathBuf::from("build-temp"))).unwrap();
                     }
                     create_dir(directory.join(PathBuf::from("build-temp"))).unwrap();
+                    let debug = {
+                        if path.parent().unwrap().file_name().unwrap() == "debug" {
+                            true
+                        } else if path.parent().unwrap().file_name().unwrap() == "release" {
+                            false
+                        } else if path
+                            .parent()
+                            .unwrap()
+                            .parent()
+                            .unwrap()
+                            .file_name()
+                            .unwrap()
+                            == "deps"
+                        {
+                            if path.parent().unwrap().file_name().unwrap() == "debug" {
+                                true
+                            } else if path
+                                .parent()
+                                .unwrap()
+                                .parent()
+                                .unwrap()
+                                .file_name()
+                                .unwrap()
+                                == "release"
+                            {
+                                false
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    };
                     let created = get_object(
                         bin_index,
                         lib_index,
@@ -300,6 +333,7 @@ fn build_iso(
                         prefix,
                         work_dir,
                         cargo_crate_name,
+                        debug,
                     );
                     let object_files: Vec<String> =
                         fs::read_dir(directory.join(PathBuf::from("build-temp")))
@@ -449,6 +483,7 @@ fn get_object(
     prefix: &str,
     work_dir: &Path,
     cargo_crate_name: &String,
+    debug: bool,
 ) -> Option<Duration> {
     let val = get_lib(
         directory,
@@ -457,12 +492,12 @@ fn get_object(
         cargo_crate_name,
         &lib_index,
     );
-    get_asm(work_dir, directory);
+    get_asm(work_dir, directory, debug);
     get_bin(index, deps_dir, prefix, directory);
     val
 }
 
-fn get_asm(work_dir: &Path, directory: &Path) {
+fn get_asm(work_dir: &Path, directory: &Path, debug: bool) {
     let asm_files: Vec<String> =
         fs::read_dir(work_dir.join(PathBuf::from("src").join(PathBuf::from("boot"))))
             .expect("Failed to read object directory")
@@ -498,6 +533,9 @@ fn get_asm(work_dir: &Path, directory: &Path) {
                 )),
             ),
         );
+        if debug {
+            command.arg("-g");
+        }
         command.status().expect("Failed to run nasm");
     }
 }
